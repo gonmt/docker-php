@@ -1,25 +1,41 @@
-FROM php:7.4-apache
+FROM php:8-fpm-alpine
+
+RUN apk update && apk add --no-cache $PHPIZE_DEPS --update git php8-pear composer freetds freetds-dev libzip-dev \
+    && pecl install xdebug redis \
+    && docker-php-ext-enable redis \
+    && docker-php-ext-install pdo pdo_mysql pdo_dblib zip
+
+WORKDIR /var/www/
+
+RUN	echo "zend_extension=$(find /usr/local/lib/php/extensions/ -name xdebug.so)" > /usr/local/etc/php/conf.d/xdebug.ini \
+    && echo "xdebug.mode=debug" >> /usr/local/etc/php/conf.d/xdebug.ini \
+    && echo "xdebug.start_with_request=yes" >> /usr/local/etc/php/conf.d/xdebug.ini \
+    && echo "xdebug.idekey=PHPSTORM" >> /usr/local/etc/php/conf.d/xdebug.ini \
+    && echo "xdebug.client_port=9000" >> /usr/local/etc/php/conf.d/xdebug.ini \
+    && echo "xdebug.remote_handler=dbgp" >> /usr/local/etc/php/conf.d/xdebug.ini
 
 ENV LIBRDKAFKA_VERSION v1.5.0
-ENV BUILD_DEPS autoconf freetds-dev git libzip-dev
+ENV BUILD_DEPS \
+  autoconf \
+        bash \
+        build-base \
+        git \
+        pcre-dev
 
-RUN apt-get update && apt-get install -y $BUILD_DEPS
-
-RUN ln -s /usr/lib/x86_64-linux-gnu/libsybdb.so /usr/lib/
-
-RUN cd /tmp \
-    && git clone --branch ${LIBRDKAFKA_VERSION} --depth 1 https://github.com/edenhill/librdkafka.git \
+RUN apk --no-cache --virtual .build-deps add ${BUILD_DEPS} \
+    && cd /tmp \
+    && git clone \
+        --branch ${LIBRDKAFKA_VERSION} \
+        --depth 1 \
+        https://github.com/edenhill/librdkafka.git \
     && cd librdkafka \
     && ./configure \
     && make \
-    && make install
+    && make install \
+    && pecl install rdkafka \
+    && docker-php-ext-enable rdkafka \
+    && rm -rf /tmp/librdkafka \
+    && apk del .build-deps
 
-RUN pecl install rdkafka redis \
-    && docker-php-ext-enable rdkafka redis \
-    && docker-php-ext-install pdo_mysql pdo_dblib bcmath zip
-
-RUN apt remove -y $BUILD_DEPS && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /tmp/librdkafka
-
-RUN sed -i -e "s/html/html\/public/g" /etc/apache2/sites-enabled/000-default.conf \
-    && a2enmod rewrite
+RUN deluser www-data \
+    && adduser -D -s /bin/ash -u 1000 www-data
